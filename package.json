@@ -1,0 +1,24 @@
+{
+  "name": "kidney-stone-analyzer",
+  "version": "1.0.0",
+  "description": "AI-powered kidney stone detection from CT scans",
+  "scripts": {
+    "dev": "node api.js && concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && python app.py",
+    "dev:frontend": "cd frontend && npm run dev",
+    "install:all": "cd backend && pip install -r requirements.txt && cd ../frontend && npm install",
+    "build": "node api.js && cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "ai",
+    "medical",
+    "kidney",
+    "detection",
+    "machine-learning"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

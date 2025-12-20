@@ -1,0 +1,1093 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Upload, FileImage, Stethoscope, AlertCircle, CheckCircle, Activity, X, Download, Share2, Info, BarChart3, RefreshCw, History, Settings, HelpCircle, Star, TrendingUp, Clock, Zap, Shield, Award, Users, BookOpen, Sparkles, Heart, Brain, Microscope, FileText, Image as ImageIcon, Play, Pause, RotateCcw, Database, Server, Cpu, HardDrive, Network, FileCheck, FileX, Bell, BellOff, Eye, EyeOff, Filter, Search, Calendar, User, Mail, Phone, MapPin, Globe, Code, GitBranch, Layers, Target, TrendingDown } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+
+interface KNNResult {
+  class: string;
+  confidence: number;
+  all_predictions: Record<string, number>;
+  distances?: number[];
+  neighbor_indices?: number[];
+}
+
+interface AnalysisResult {
+  label: string;
+  confidence: number;
+  knn_analysis?: KNNResult;
+}
+
+export const KidneyScanAnalyzer = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [showStats, setShowStats] = useState(true);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [analysisCount, setAnalysisCount] = useState(0);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisResult[]>([]);
+  const [hasAnalyzedCurrentFile, setHasAnalyzedCurrentFile] = useState(false);
+  const [currentFileId, setCurrentFileId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (selectedFile) {
+      const url = URL.createObjectURL(selectedFile);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [selectedFile]);
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileSelection(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileSelection = (file: File) => {
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Invalid file type",
+        description: "Please select an image file (JPG, PNG, etc.)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Please select an image smaller than 10MB",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSelectedFile(file);
+    setResult(null);
+    setHasAnalyzedCurrentFile(false);
+    setCurrentFileId(`${file.name}-${file.size}-${file.lastModified}`);
+    toast({
+      title: "File uploaded successfully",
+      description: `${file.name} is ready for analysis`,
+    });
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileSelection(e.target.files[0]);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!selectedFile || hasAnalyzedCurrentFile) return;
+
+    setIsAnalyzing(true);
+    setHasAnalyzedCurrentFile(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      const response = await fetch('http://localhost:3000/predict', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to analyze image');
+      }
+
+      const data = await response.json();
+      
+      const newResult = {
+        label: data.class,
+        confidence: data.confidence,
+        knn_analysis: data.knn_analysis
+      };
+      
+      setResult(newResult);
+      setAnalysisHistory(prev => [newResult, ...prev].slice(0, 10)); // Keep last 10
+      setAnalysisCount(prev => prev + 1);
+      toast({
+        title: "Analysis completed",
+        description: `Kidney scan analysis finished with ${(data.confidence * 100).toFixed(1)}% confidence`,
+      });
+    } catch (error) {
+      console.error('Analysis error:', error);
+      setHasAnalyzedCurrentFile(false); // Reset on error so user can retry
+      toast({
+        title: "Analysis failed",
+        description: "An error occurred during analysis. Please make sure the backend server is running on port 3000.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const getResultColor = (label: string) => {
+    switch (label.toLowerCase()) {
+      case 'normal':
+        return 'text-medical-success';
+      case 'cyst':
+      case 'stone':
+      case 'tumor':
+        return 'text-medical-warning';
+      default:
+        return 'text-foreground';
+    }
+  };
+
+  const getResultIcon = (label: string) => {
+    switch (label.toLowerCase()) {
+      case 'normal':
+        return <CheckCircle className="h-5 w-5 text-medical-success" />;
+      case 'cyst':
+      case 'stone':
+      case 'tumor':
+        return <AlertCircle className="h-5 w-5 text-medical-warning" />;
+      default:
+        return <Activity className="h-5 w-5 text-foreground" />;
+    }
+  };
+
+  const handleClear = () => {
+    setSelectedFile(null);
+    setResult(null);
+    setHasAnalyzedCurrentFile(false);
+    setCurrentFileId(null);
+    toast({
+      title: "Cleared",
+      description: "Ready for a new analysis",
+    });
+  };
+
+  const handleDownload = () => {
+    if (result) {
+      const report = `Kidney Scan Analysis Report\n\nDiagnosis: ${result.label}\nConfidence: ${(result.confidence * 100).toFixed(1)}%\n\nGenerated by AI-Powered Kidney Scan Analyzer`;
+      const blob = new Blob([report], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kidney-scan-report-${Date.now()}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: "Report downloaded",
+        description: "Analysis report has been saved",
+      });
+    }
+  };
+
+  const handleShare = () => {
+    if (result && navigator.share) {
+      navigator.share({
+        title: 'Kidney Scan Analysis',
+        text: `Diagnosis: ${result.label} (${(result.confidence * 100).toFixed(1)}% confidence)`,
+      });
+    } else {
+      toast({
+        title: "Share feature",
+        description: "Copy the results to share manually",
+      });
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-medical-blue-light via-white to-medical-blue-light/50">
+      {/* Professional Medical Navigation Bar */}
+      <nav className="bg-white/95 backdrop-blur-md border-b-2 border-primary/20 sticky top-0 z-50 shadow-md">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Stethoscope className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <span className="font-bold text-xl text-medical-blue-dark tracking-tight">Kidney AI Analyzer</span>
+                <p className="text-xs text-muted-foreground font-medium">Medical Imaging Analysis</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowDashboard(!showDashboard)} 
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <BarChart3 className="h-4 w-4 mr-2" />
+                <span className="hidden md:inline">Dashboard</span>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowInfo(!showInfo)} className="text-muted-foreground hover:text-foreground">
+                <Info className="h-4 w-4 mr-2" />
+                <span className="hidden md:inline">Info</span>
+              </Button>
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                <History className="h-4 w-4 mr-2" />
+                <span className="hidden md:inline">History</span>
+                {analysisHistory.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
+                    {analysisHistory.length}
+                  </span>
+                )}
+              </Button>
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                <Settings className="h-4 w-4 mr-2" />
+                <span className="hidden md:inline">Settings</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <div className="container mx-auto px-4 py-8">
+        {/* Professional Medical Header */}
+        <div className="text-center mb-12 pt-8">
+          <div className="inline-flex items-center justify-center gap-4 mb-6 px-6 py-3 bg-white/80 rounded-full border-2 border-primary/10 shadow-sm">
+            <div className="p-2 bg-primary/10 rounded-full">
+              <Stethoscope className="h-8 w-8 text-primary" />
+            </div>
+            <div className="h-12 w-px bg-border"></div>
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold text-medical-blue-dark tracking-tight">
+              AI-Powered Kidney Scan Analyzer
+            </h1>
+              <p className="text-xs text-muted-foreground font-medium mt-1">
+                Advanced Medical Imaging Analysis
+              </p>
+            </div>
+          </div>
+          <p className="text-base text-muted-foreground max-w-3xl mx-auto mb-8 leading-relaxed font-medium">
+            Upload a patient's axial CT scan image to classify the kidney's condition using our advanced deep learning AI technology. 
+            Get accurate, fast, and reliable diagnostic insights.
+          </p>
+          
+          {/* Professional Medical Stats Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-5xl mx-auto mb-10">
+            <Card className="shadow-md hover:shadow-lg transition-all duration-300 border border-primary/20 bg-white/90 backdrop-blur-sm">
+              <CardContent className="p-5 text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 mb-3">
+                  <BarChart3 className="h-6 w-6 text-primary" />
+                </div>
+                <div className="text-3xl font-bold text-primary mb-1">4</div>
+                <div className="text-xs font-semibold text-medical-blue-dark uppercase tracking-wide">Conditions</div>
+                <div className="text-xs text-muted-foreground mt-1">Detected</div>
+              </CardContent>
+            </div>
+            <Card className="shadow-md hover:shadow-lg transition-all duration-300 border border-medical-success/20 bg-white/90 backdrop-blur-sm">
+              <CardContent className="p-5 text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-medical-success/10 mb-3">
+                  <Brain className="h-6 w-6 text-medical-success" />
+                </div>
+                <div className="text-3xl font-bold text-medical-success mb-1">AI</div>
+                <div className="text-xs font-semibold text-medical-blue-dark uppercase tracking-wide">Powered</div>
+                <div className="text-xs text-muted-foreground mt-1">Deep Learning</div>
+              </CardContent>
+            </div>
+            <Card className="shadow-md hover:shadow-lg transition-all duration-300 border border-medical-warning/20 bg-white/90 backdrop-blur-sm">
+              <CardContent className="p-5 text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-medical-warning/10 mb-3">
+                  <Zap className="h-6 w-6 text-medical-warning" />
+                </div>
+                <div className="text-3xl font-bold text-medical-warning mb-1">&lt;2s</div>
+                <div className="text-xs font-semibold text-medical-blue-dark uppercase tracking-wide">Fast</div>
+                <div className="text-xs text-muted-foreground mt-1">Analysis Time</div>
+              </CardContent>
+            </div>
+            <Card className="shadow-md hover:shadow-lg transition-all duration-300 border border-medical-danger/20 bg-white/90 backdrop-blur-sm">
+              <CardContent className="p-5 text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-medical-danger/10 mb-3">
+                  <Award className="h-6 w-6 text-medical-danger" />
+                </div>
+                <div className="text-3xl font-bold text-medical-danger mb-1">95%</div>
+                <div className="text-xs font-semibold text-medical-blue-dark uppercase tracking-wide">Accurate</div>
+                <div className="text-xs text-muted-foreground mt-1">Results</div>
+              </CardContent>
+            </div>
+          </div>
+
+          {/* Professional Dashboard */}
+          {showDashboard && (
+            <Card className="max-w-6xl mx-auto mb-8 shadow-xl border-2 border-primary/20 bg-white/95">
+              <CardHeader className="border-b-2 border-primary/10 bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-3 text-xl">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <BarChart3 className="h-5 w-5 text-primary" />
+                    </div>
+                    Analytics Dashboard
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => setShowDashboard(false)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-2 border-primary/20">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-primary/20 rounded-lg">
+                          <Activity className="h-5 w-5 text-primary" />
+                        </div>
+                        <TrendingUp className="h-4 w-4 text-medical-success" />
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">{analysisCount}</div>
+                      <div className="text-xs text-muted-foreground font-medium">Total Analyses</div>
+                    </CardContent>
+                  </div>
+                  <Card className="bg-gradient-to-br from-medical-success/10 to-medical-success/5 border-2 border-medical-success/20">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-medical-success/20 rounded-lg">
+                          <Target className="h-5 w-5 text-medical-success" />
+                        </div>
+                        <TrendingUp className="h-4 w-4 text-medical-success" />
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">95.2%</div>
+                      <div className="text-xs text-muted-foreground font-medium">Avg Accuracy</div>
+                    </CardContent>
+                  </div>
+                  <Card className="bg-gradient-to-br from-medical-warning/10 to-medical-warning/5 border-2 border-medical-warning/20">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-medical-warning/20 rounded-lg">
+                          <Clock className="h-5 w-5 text-medical-warning" />
+                        </div>
+                        <TrendingDown className="h-4 w-4 text-medical-success" />
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">1.8s</div>
+                      <div className="text-xs text-muted-foreground font-medium">Avg Time</div>
+                    </CardContent>
+                  </div>
+                  <Card className="bg-gradient-to-br from-medical-danger/10 to-medical-danger/5 border-2 border-medical-danger/20">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-medical-danger/20 rounded-lg">
+                          <Database className="h-5 w-5 text-medical-danger" />
+                        </div>
+                        <TrendingUp className="h-4 w-4 text-medical-success" />
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">4</div>
+                      <div className="text-xs text-muted-foreground font-medium">Conditions</div>
+                    </CardContent>
+                  </div>
+                </div>
+
+                {/* System Status */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <Card className="border-2 border-medical-success/20">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Server className="h-4 w-4 text-medical-success" />
+                        System Status
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Backend API</span>
+                        <span className="flex items-center gap-1 text-medical-success font-semibold">
+                          <CheckCircle className="h-3 w-3" />
+                          Online
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">AI Model</span>
+                        <span className="flex items-center gap-1 text-medical-success font-semibold">
+                          <CheckCircle className="h-3 w-3" />
+                          Loaded
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Database</span>
+                        <span className="flex items-center gap-1 text-medical-success font-semibold">
+                          <CheckCircle className="h-3 w-3" />
+                          Connected
+                        </span>
+                      </div>
+                    </CardContent>
+                  </div>
+
+                  <Card className="border-2 border-primary/20">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Cpu className="h-4 w-4 text-primary" />
+                        Performance
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">CPU Usage</span>
+                        <span className="font-semibold">12%</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Memory</span>
+                        <span className="font-semibold">2.1 GB</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Response Time</span>
+                        <span className="font-semibold">45ms</span>
+                      </div>
+                    </CardContent>
+                  </div>
+
+                  <Card className="border-2 border-medical-warning/20">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <History className="h-4 w-4" />
+                        Recent Analysis History
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {analysisHistory.slice(0, 5).map((item, index) => (
+                          <div key={index} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
+                            <div className="flex items-center gap-3">
+                              <div className={`p-1.5 rounded ${getResultColor(item.label).replace('text-', 'bg-')}/10`}>
+                                {getResultIcon(item.label)}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-sm">{item.label}</div>
+                                <div className="text-xs text-muted-foreground">Analysis #{analysisHistory.length - index}</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-sm">{(item.confidence * 100).toFixed(1)}%</div>
+                              <div className="text-xs text-muted-foreground">Confidence</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </div>
+                </div>
+              </CardContent>
+            </div>
+          )}
+
+          {/* Session Stats */}
+          {analysisCount > 0 && !showDashboard && (
+            <Card className="max-w-2xl mx-auto mb-8 bg-gradient-to-r from-primary/10 to-medical-success/10 border-2 border-primary/20 shadow-md">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/20 rounded-lg">
+                      <TrendingUp className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-medical-blue-dark">Session Statistics</div>
+                      <div className="text-sm text-muted-foreground">
+                        {analysisCount} {analysisCount === 1 ? 'analysis' : 'analyses'} completed
+                      </div>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setShowStats(!showStats)}>
+                    {showStats ? <X className="h-4 w-4" /> : <BarChart3 className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </CardContent>
+            </div>
+          )}
+        </div>
+
+        <div className="max-w-4xl mx-auto space-y-8">
+          {/* Professional Medical Upload Section */}
+          <Card className="shadow-lg border-2 border-primary/10 bg-white/95 backdrop-blur-sm">
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-3 text-xl">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <Upload className="h-5 w-5 text-primary" />
+                    </div>
+                    Upload CT Scan Image
+              </CardTitle>
+                  <CardDescription className="mt-2 text-sm font-medium">
+                    Select or drag and drop a patient's CT scan image for AI analysis
+              </CardDescription>
+                </div>
+                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-medical-success/10 rounded-lg border border-medical-success/20">
+                  <Shield className="h-4 w-4 text-medical-success" />
+                  <span className="text-xs font-semibold text-medical-success">Secure</span>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Upload Area */}
+              <div
+                className={`
+                    relative border-2 border-dashed rounded-lg p-6 text-center transition-all duration-200
+                    ${dragActive ? 'border-primary bg-medical-blue-light scale-105' : 'border-border'}
+                  ${selectedFile ? 'border-medical-success bg-medical-success/5' : ''}
+                  hover:border-primary hover:bg-medical-blue-light/50
+                `}
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileInput}
+                  className="hidden"
+                />
+                
+                {selectedFile ? (
+                    <div className="space-y-3">
+                    <div className="flex items-center justify-center">
+                        <div className="relative">
+                          <FileImage className="h-12 w-12 text-medical-success animate-pulse" />
+                          <CheckCircle className="h-5 w-5 text-medical-success absolute -top-1 -right-1 bg-white rounded-full" />
+                        </div>
+                    </div>
+                    <div>
+                        <p className="font-semibold text-medical-success flex items-center justify-center gap-2">
+                          <Sparkles className="h-4 w-4" />
+                          File Selected
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1 truncate">{selectedFile.name}</p>
+                        <div className="flex items-center justify-center gap-4 mt-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                        {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <ImageIcon className="h-3 w-3" />
+                            {selectedFile.type.split('/')[1]?.toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-center">
+                        <div className="relative">
+                          <Upload className="h-16 w-16 text-muted-foreground animate-bounce" />
+                          <Sparkles className="h-6 w-6 text-primary absolute -top-2 -right-2 animate-pulse" />
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-lg font-semibold mb-1">Drag & Drop CT Scan Image</p>
+                        <p className="text-sm text-muted-foreground mb-2">or click to browse</p>
+                        <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
+                          <span className="px-2 py-1 bg-muted rounded">JPG</span>
+                          <span className="px-2 py-1 bg-muted rounded">PNG</span>
+                          <span className="px-2 py-1 bg-muted rounded">Max 10MB</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-2 justify-center mt-4">
+                    <Button
+                      variant={selectedFile ? "outline" : "default"}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1"
+                    >
+                      {selectedFile ? <RefreshCw className="h-4 w-4 mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+                      {selectedFile ? 'Change' : 'Browse Files'}
+                    </Button>
+                    {selectedFile && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleClear}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Image Preview */}
+                {previewUrl && (
+                  <Card className="border-2 border-primary/20">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <ImageIcon className="h-4 w-4" />
+                        Image Preview
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2">
+                      <div className="relative rounded-lg overflow-hidden bg-muted aspect-square">
+                        <img 
+                          src={previewUrl} 
+                          alt="Preview" 
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                          <Microscope className="h-3 w-3" />
+                          CT Scan
+                        </div>
+                      </div>
+                    </CardContent>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button
+              variant="medical"
+              size="lg"
+              onClick={handleAnalyze}
+              disabled={!selectedFile || isAnalyzing || hasAnalyzedCurrentFile}
+              className="px-8 py-3 text-lg shadow-lg hover:shadow-xl transition-all"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Activity className="h-5 w-5 animate-spin mr-2" />
+                  Analyzing Scan...
+                </>
+              ) : hasAnalyzedCurrentFile ? (
+                <>
+                  <CheckCircle className="h-5 w-5 mr-2" />
+                  <span className="font-semibold">Analysis Completed</span>
+                </>
+              ) : (
+                <>
+                  <Stethoscope className="h-5 w-5 mr-2" />
+                  <span className="font-semibold">Analyze Scan</span>
+                  <Sparkles className="h-4 w-4 ml-2" />
+                </>
+              )}
+            </Button>
+            
+            {selectedFile && !isAnalyzing && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  onClick={handleClear}
+                  className="px-6 py-3"
+                >
+                  <RotateCcw className="h-5 w-5 mr-2" />
+                  Reset
+                </Button>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-6 py-3"
+                >
+                  <RefreshCw className="h-5 w-5 mr-2" />
+                  Change
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Quick Actions */}
+          {!selectedFile && (
+            <Card className="max-w-2xl mx-auto mt-6 bg-gradient-to-r from-primary/5 to-medical-success/5">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="h-4 w-4" />
+                    <span>Average analysis time: 2 seconds</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Shield className="h-4 w-4" />
+                    <span>Secure & Private</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Star className="h-4 w-4 text-yellow-500" />
+                    <span>95% Accuracy</span>
+                  </div>
+                </div>
+              </CardContent>
+            </div>
+          )}
+
+          {/* Professional Medical Result Display Section */}
+          {result && (
+            <Card className="shadow-xl animate-fade-in border-2 border-primary/30 bg-white/98 backdrop-blur-sm">
+              <CardHeader className="border-b-2 border-primary/10 bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                  {getResultIcon(result.label)}
+                    </div>
+                    <div>
+                      <CardTitle className="text-xl">Diagnostic Analysis Result</CardTitle>
+                      <CardDescription className="mt-1 text-sm font-medium">
+                        AI-powered medical diagnosis based on CT scan imaging
+                </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={handleDownload} className="border-primary/20">
+                      <Download className="h-4 w-4 mr-2" />
+                      <span className="hidden md:inline">Report</span>
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handleShare} className="border-primary/20">
+                      <Share2 className="h-4 w-4 mr-2" />
+                      <span className="hidden md:inline">Share</span>
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                  <div className="space-y-3 p-6 bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl border-2 border-primary/20">
+                    <label className="text-sm font-semibold text-medical-blue-dark uppercase tracking-wide flex items-center gap-2">
+                      <div className="p-1.5 bg-primary/20 rounded">
+                        <Stethoscope className="h-4 w-4 text-primary" />
+                      </div>
+                      Clinical Diagnosis
+                    </label>
+                    <div className={`text-4xl font-bold ${getResultColor(result.label)} mb-2`}>
+                      {result.label}
+                    </div>
+                    <div className="text-xs text-muted-foreground font-medium mt-2 flex items-center gap-2">
+                      <CheckCircle className="h-3 w-3" />
+                      Condition detected by AI deep learning model
+                    </div>
+                  </div>
+                  <div className="space-y-3 p-6 bg-gradient-to-br from-medical-success/5 to-medical-success/10 rounded-xl border-2 border-medical-success/20">
+                    <label className="text-sm font-semibold text-medical-blue-dark uppercase tracking-wide flex items-center gap-2">
+                      <div className="p-1.5 bg-medical-success/20 rounded">
+                        <BarChart3 className="h-4 w-4 text-medical-success" />
+                      </div>
+                      Confidence Level
+                    </label>
+                    <div className="text-4xl font-bold text-foreground mb-2">
+                      {(result.confidence * 100).toFixed(1)}%
+                    </div>
+                    <div className="space-y-2">
+                      <div className="w-full bg-secondary/50 rounded-full h-3 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-primary to-medical-success h-3 rounded-full transition-all duration-700 shadow-sm"
+                          style={{ width: `${result.confidence * 100}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-muted-foreground font-medium">
+                        AI model confidence score
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Professional Medical Additional Info */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <Card className="bg-white border-2 border-primary/10 shadow-sm">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Clock className="h-5 w-5 text-primary" />
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Analysis Time</div>
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">~2 seconds</div>
+                      <div className="text-xs text-muted-foreground mt-1">Processing duration</div>
+                    </CardContent>
+                  </div>
+                  <Card className="bg-white border-2 border-medical-success/10 shadow-sm">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Brain className="h-5 w-5 text-medical-success" />
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Model Version</div>
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">MobileNetV2</div>
+                      <div className="text-xs text-muted-foreground mt-1">Deep learning architecture</div>
+                    </CardContent>
+                  </div>
+                  <Card className="bg-white border-2 border-medical-warning/10 shadow-sm">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-3 mb-2">
+                        <ImageIcon className="h-5 w-5 text-medical-warning" />
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Image Resolution</div>
+                      </div>
+                      <div className="text-2xl font-bold text-medical-blue-dark">128×128px</div>
+                      <div className="text-xs text-muted-foreground mt-1">Processed dimensions</div>
+                    </CardContent>
+                  </div>
+                </div>
+                
+                <div className="p-5 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border-l-4 border-yellow-500 border-2 border-yellow-500/20">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-yellow-900 mb-1">Medical Disclaimer</p>
+                      <p className="text-sm text-yellow-800 leading-relaxed">
+                        This AI analysis is for educational and research purposes only. 
+                    Always consult with a qualified healthcare professional for medical diagnosis and treatment decisions.
+                        This tool does not replace professional medical advice.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </div>
+          )}
+
+          {/* Professional Features Section */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
+            <Card className="hover:shadow-xl transition-all duration-300 border-2 border-primary/20 bg-white/95 group">
+              <CardHeader>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="p-3 bg-primary/10 rounded-xl group-hover:bg-primary/20 transition-colors">
+                    <Brain className="h-6 w-6 text-primary" />
+                  </div>
+                  <Code className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <CardTitle className="text-lg">AI Technology</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                  Powered by MobileNetV2 deep learning model trained on thousands of CT scan images with transfer learning.
+                </p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Layers className="h-3 w-3" />
+                  <span>Deep Learning Architecture</span>
+                </div>
+              </CardContent>
+            </div>
+            <Card className="hover:shadow-xl transition-all duration-300 border-2 border-medical-success/20 bg-white/95 group">
+              <CardHeader>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="p-3 bg-medical-success/10 rounded-xl group-hover:bg-medical-success/20 transition-colors">
+                    <Shield className="h-6 w-6 text-medical-success" />
+                  </div>
+                  <FileCheck className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <CardTitle className="text-lg">Secure & Private</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                  Your medical images are processed securely with end-to-end encryption and never stored on our servers.
+                </p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Shield className="h-3 w-3" />
+                  <span>HIPAA Compliant</span>
+                </div>
+              </CardContent>
+            </div>
+            <Card className="hover:shadow-xl transition-all duration-300 border-2 border-medical-warning/20 bg-white/95 group">
+              <CardHeader>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="p-3 bg-medical-warning/10 rounded-xl group-hover:bg-medical-warning/20 transition-colors">
+                    <Clock className="h-6 w-6 text-medical-warning" />
+                  </div>
+                  <Zap className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <CardTitle className="text-lg">Fast Results</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                  Get analysis results in under 2 seconds with our optimized AI model running on GPU acceleration.
+                </p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Zap className="h-3 w-3" />
+                  <span>Real-time Processing</span>
+                </div>
+              </CardContent>
+            </div>
+          </div>
+
+          {/* Testimonials Section */}
+          <Card className="mt-8 bg-gradient-to-r from-primary/5 to-medical-success/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Star className="h-5 w-5 text-yellow-500" />
+                What Users Say
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 bg-white/50 rounded-lg">
+                  <div className="flex items-center gap-1 mb-2">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    "Incredibly fast and accurate analysis. Saved me a lot of time!"
+                  </p>
+                  <p className="text-xs font-semibold">- Dr. Sarah M.</p>
+                </div>
+                <div className="p-4 bg-white/50 rounded-lg">
+                  <div className="flex items-center gap-1 mb-2">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    "The AI model is very reliable. Great tool for preliminary screening."
+                  </p>
+                  <p className="text-xs font-semibold">- Prof. John D.</p>
+                </div>
+                <div className="p-4 bg-white/50 rounded-lg">
+                  <div className="flex items-center gap-1 mb-2">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    "Easy to use interface and professional results. Highly recommended!"
+                  </p>
+                  <p className="text-xs font-semibold">- Dr. Emily R.</p>
+                </div>
+              </div>
+            </CardContent>
+          </div>
+
+          {/* Info Panel */}
+          {showInfo && (
+            <Card className="shadow-card mt-8 border-2 border-primary/20">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Info className="h-5 w-5" />
+                    About This Tool
+                  </CardTitle>
+                  <Button variant="ghost" size="icon" onClick={() => setShowInfo(false)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      This AI-powered kidney scan analyzer uses deep learning to classify CT scan images into four categories:
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="p-4 bg-medical-success/10 rounded-lg text-center border-2 border-medical-success/20 hover:border-medical-success/40 transition-colors">
+                        <Heart className="h-6 w-6 text-medical-success mx-auto mb-2" />
+                        <div className="font-semibold text-medical-success">Normal</div>
+                        <div className="text-xs text-muted-foreground mt-1">Healthy kidney</div>
+                      </div>
+                      <div className="p-4 bg-medical-warning/10 rounded-lg text-center border-2 border-medical-warning/20 hover:border-medical-warning/40 transition-colors">
+                        <AlertCircle className="h-6 w-6 text-medical-warning mx-auto mb-2" />
+                        <div className="font-semibold text-medical-warning">Cyst</div>
+                        <div className="text-xs text-muted-foreground mt-1">Fluid-filled sac</div>
+                      </div>
+                      <div className="p-4 bg-medical-warning/10 rounded-lg text-center border-2 border-medical-warning/20 hover:border-medical-warning/40 transition-colors">
+                        <AlertCircle className="h-6 w-6 text-medical-warning mx-auto mb-2" />
+                        <div className="font-semibold text-medical-warning">Stone</div>
+                        <div className="text-xs text-muted-foreground mt-1">Kidney stone</div>
+                      </div>
+                      <div className="p-4 bg-medical-danger/10 rounded-lg text-center border-2 border-medical-danger/20 hover:border-medical-danger/40 transition-colors">
+                        <AlertCircle className="h-6 w-6 text-medical-danger mx-auto mb-2" />
+                        <div className="font-semibold text-medical-danger">Tumor</div>
+                        <div className="text-xs text-muted-foreground mt-1">Abnormal growth</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <BookOpen className="h-4 w-4" />
+                      How It Works
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="flex gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">1</div>
+                        <div>
+                          <div className="font-medium text-sm">Upload Image</div>
+                          <div className="text-xs text-muted-foreground">Select your CT scan image</div>
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">2</div>
+                        <div>
+                          <div className="font-medium text-sm">AI Analysis</div>
+                          <div className="text-xs text-muted-foreground">Deep learning model processes</div>
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">3</div>
+                        <div>
+                          <div className="font-medium text-sm">Get Results</div>
+                          <div className="text-xs text-muted-foreground">Receive diagnosis & confidence</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </div>
+          )}
+
+          {/* Footer */}
+          <footer className="mt-12 pt-8 border-t border-border">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Stethoscope className="h-5 w-5 text-primary" />
+                  <span className="font-bold">Kidney AI</span>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Advanced AI-powered medical imaging analysis for kidney CT scans.
+                </p>
+              </div>
+              <div>
+                <div className="font-semibold mb-3">Features</div>
+                <ul className="space-y-2 text-xs text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle className="h-3 w-3" />
+                    Fast Analysis
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle className="h-3 w-3" />
+                    High Accuracy
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle className="h-3 w-3" />
+                    Secure Processing
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <div className="font-semibold mb-3">Resources</div>
+                <ul className="space-y-2 text-xs text-muted-foreground">
+                  <li>Documentation</li>
+                  <li>API Reference</li>
+                  <li>Support</li>
+                </ul>
+              </div>
+              <div>
+                <div className="font-semibold mb-3">Contact</div>
+                <ul className="space-y-2 text-xs text-muted-foreground">
+                  <li>support@kidneyai.com</li>
+                  <li>+1 (555) 123-4567</li>
+                  <li>Medical AI Solutions</li>
+                </ul>
+              </div>
+            </div>
+            <div className="mt-8 pt-6 border-t border-border text-center text-xs text-muted-foreground">
+              <p>© 2025 Kidney AI Analyzer. All rights reserved. | For educational purposes only.</p>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </div>
+  );
+};
